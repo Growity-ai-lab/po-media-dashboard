@@ -1,7 +1,8 @@
 """
 PO Premium - Audience Intersection Builder
+JavaScript ayri endpoint olarak sunuluyor (CSP uyumlu)
 """
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, Response, jsonify
 import json, os
 
 app = Flask(__name__)
@@ -59,6 +60,19 @@ INTERESTS = {
     ],
 }
 
+@app.route('/')
+def index():
+    return HTML
+
+@app.route('/app.js')
+def app_js():
+    js = JS_CODE.replace('__INTERESTS_DATA__', json.dumps(INTERESTS))
+    return Response(js, mimetype='application/javascript')
+
+@app.route('/api/interests')
+def api_interests():
+    return jsonify(INTERESTS)
+
 HTML = '''<!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -66,25 +80,135 @@ HTML = '''<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PO Premium Audience Builder</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script>
-// GLOBAL DATA & STATE
-var INTERESTS_DATA = %s;
+</head>
+<body class="bg-slate-900 text-white min-h-screen p-4">
+<div class="max-w-7xl mx-auto">
+
+<div class="flex items-center gap-4 mb-6">
+    <div class="w-12 h-12 bg-gradient-to-br from-orange-500 to-yellow-500 rounded-xl flex items-center justify-center font-bold text-xl">PO</div>
+    <div>
+        <h1 class="text-xl font-bold text-orange-400">Premium Audience Builder</h1>
+        <p class="text-slate-400 text-sm">Gercek Zamanli Kesisim Analizi</p>
+    </div>
+</div>
+
+<div class="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3 mb-6">
+    <p class="text-sm">Kategoriden interest secin, segment butonlarina tiklayin. Venn ve reach anlik guncellenir.</p>
+</div>
+
+<div class="grid lg:grid-cols-12 gap-4">
+
+<div class="lg:col-span-3 space-y-4">
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+        <h3 class="text-sm text-slate-400 mb-3">KATEGORILER</h3>
+        <div class="grid grid-cols-2 gap-2" id="category-buttons"></div>
+    </div>
+    
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+        <h3 class="text-sm text-slate-400 mb-3" id="cat-title">INTERESTS</h3>
+        <div id="interest-list" class="max-h-80 overflow-y-auto">
+            <p class="text-slate-500 text-sm">Kategori secin</p>
+        </div>
+    </div>
+</div>
+
+<div class="lg:col-span-4">
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="font-semibold">Segmentler</h3>
+            <button id="btn-add-segment" class="px-3 py-1 bg-green-500/20 text-green-400 rounded text-sm hover:bg-green-500/30">+ Ekle</button>
+        </div>
+        <div id="segment-list"></div>
+    </div>
+</div>
+
+<div class="lg:col-span-5 space-y-4">
+    <div class="grid grid-cols-2 gap-4">
+        <div class="bg-blue-500/20 rounded-xl p-4 border border-blue-500/30">
+            <p class="text-xs text-slate-400">Birlesim (OR)</p>
+            <p class="text-2xl font-bold text-blue-400" id="union-val">0</p>
+        </div>
+        <div class="bg-purple-500/20 rounded-xl p-4 border border-purple-500/30">
+            <p class="text-xs text-slate-400">Kesisim (AND)</p>
+            <p class="text-2xl font-bold text-purple-400" id="inter-val">0</p>
+        </div>
+    </div>
+    
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+        <h3 class="text-sm font-semibold mb-3">Venn Diagram</h3>
+        <svg id="venn" viewBox="0 0 400 250" class="w-full bg-slate-900/50 rounded-lg">
+            <text x="200" y="125" text-anchor="middle" fill="#64748b" font-size="14">Interest ekleyin</text>
+        </svg>
+    </div>
+    
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+        <h3 class="text-sm font-semibold mb-3">Segment Reach</h3>
+        <div id="reach-list">
+            <p class="text-slate-500 text-sm text-center py-2">Interest ekleyin</p>
+        </div>
+    </div>
+    
+    <div class="grid grid-cols-2 gap-2">
+        <button id="btn-export" class="py-2 bg-green-500/20 text-green-400 rounded text-sm hover:bg-green-500/30">JSON Export</button>
+        <button id="btn-copy-inter" class="py-2 bg-purple-500/20 text-purple-400 rounded text-sm hover:bg-purple-500/30">Kesisim Kopyala</button>
+    </div>
+</div>
+
+</div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>'''
+
+JS_CODE = '''
+var INTERESTS_DATA = __INTERESTS_DATA__;
 var segments = [];
 var segmentId = 0;
 var COLORS = ["#FF6B00", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"];
 var currentCategory = null;
 
-// FUNCTIONS - defined before DOM loads
+var CATEGORY_INFO = {
+    coffee: {name: "Kahve", icon: "\\u2615"},
+    food: {name: "Yemek", icon: "\\uD83C\\uDF7D"},
+    travel: {name: "Seyahat", icon: "\\u2708"},
+    family: {name: "Aile", icon: "\\uD83D\\uDC68\\u200D\\uD83D\\uDC69\\u200D\\uD83D\\uDC67"},
+    wellness: {name: "Saglik", icon: "\\uD83E\\uDDD8"},
+    tech: {name: "Teknoloji", icon: "\\uD83D\\uDCF1"},
+    shopping: {name: "Alisveris", icon: "\\uD83D\\uDED2"},
+    entertainment: {name: "Eglence", icon: "\\uD83C\\uDFAC"},
+    auto: {name: "Otomotiv", icon: "\\uD83D\\uDE97"},
+    premium: {name: "Premium", icon: "\\u2B50"}
+};
+
+document.addEventListener("DOMContentLoaded", function() {
+    renderCategories();
+    document.getElementById("btn-add-segment").addEventListener("click", addSegment);
+    document.getElementById("btn-export").addEventListener("click", exportJSON);
+    document.getElementById("btn-copy-inter").addEventListener("click", copyIntersection);
+    addSegment();
+});
+
+function renderCategories() {
+    var container = document.getElementById("category-buttons");
+    var html = "";
+    for (var key in CATEGORY_INFO) {
+        var cat = CATEGORY_INFO[key];
+        html += "<button data-cat='" + key + "' class='cat-btn p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm'>" + cat.icon + " " + cat.name + "</button>";
+    }
+    container.innerHTML = html;
+    
+    var btns = container.querySelectorAll(".cat-btn");
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].addEventListener("click", function() {
+            loadCategory(this.getAttribute("data-cat"));
+        });
+    }
+}
+
 function loadCategory(cat) {
     currentCategory = cat;
     var items = INTERESTS_DATA[cat] || [];
-    var titles = {
-        coffee: "KAHVE", food: "YEMEK", travel: "SEYAHAT",
-        family: "AILE", wellness: "SAGLIK", tech: "TEKNOLOJI",
-        shopping: "ALISVERIS", entertainment: "EGLENCE",
-        auto: "OTOMOTIV", premium: "PREMIUM"
-    };
-    document.getElementById("cat-title").textContent = titles[cat] || "INTERESTS";
+    document.getElementById("cat-title").textContent = CATEGORY_INFO[cat] ? CATEGORY_INFO[cat].name.toUpperCase() : "INTERESTS";
     renderInterests(items);
 }
 
@@ -95,31 +219,50 @@ function renderInterests(items) {
         return;
     }
     
-    var html = "";
+    container.innerHTML = "";
+    
     for (var i = 0; i < items.length; i++) {
         var item = items[i];
+        var div = document.createElement("div");
+        div.className = "bg-slate-700/50 rounded p-3 mb-2";
+        
         var reachM = (item.reach / 1000000).toFixed(1);
-        html += "<div class='bg-slate-700/50 rounded p-3 mb-2'>";
-        html += "<div class='mb-2'><div class='text-sm font-medium'>" + item.name + "</div>";
-        html += "<div class='text-xs text-slate-400'>" + reachM + "M reach</div></div>";
-        html += "<div class='flex flex-wrap gap-1'>";
+        var headerDiv = document.createElement("div");
+        headerDiv.className = "mb-2";
+        headerDiv.innerHTML = "<div class='text-sm font-medium'>" + item.name + "</div><div class='text-xs text-slate-400'>" + reachM + "M reach</div>";
+        div.appendChild(headerDiv);
+        
+        var btnDiv = document.createElement("div");
+        btnDiv.className = "flex flex-wrap gap-1";
         
         for (var j = 0; j < segments.length; j++) {
             var seg = segments[j];
+            var btn = document.createElement("button");
             var isIn = isInterestInSegment(item.id, seg.id);
-            if (isIn) {
-                html += "<button onclick=\"toggleInt('" + item.id + "','" + item.name + "'," + item.reach + "," + seg.id + ")\" ";
-                html += "class='px-2 py-1 rounded text-xs text-white' style='background:" + seg.color + "'>";
-                html += "\\u2713 " + seg.name + "</button>";
-            } else {
-                html += "<button onclick=\"toggleInt('" + item.id + "','" + item.name + "'," + item.reach + "," + seg.id + ")\" ";
-                html += "class='px-2 py-1 rounded text-xs bg-slate-600 text-slate-300 hover:bg-slate-500'>";
-                html += "+ " + seg.name + "</button>";
-            }
+            
+            btn.className = "px-2 py-1 rounded text-xs " + (isIn ? "text-white" : "bg-slate-600 text-slate-300 hover:bg-slate-500");
+            if (isIn) btn.style.background = seg.color;
+            btn.textContent = (isIn ? "\\u2713 " : "+ ") + seg.name;
+            btn.setAttribute("data-int-id", item.id);
+            btn.setAttribute("data-int-name", item.name);
+            btn.setAttribute("data-int-reach", item.reach);
+            btn.setAttribute("data-seg-id", seg.id);
+            btn.addEventListener("click", handleToggleInterest);
+            btnDiv.appendChild(btn);
         }
-        html += "</div></div>";
+        
+        div.appendChild(btnDiv);
+        container.appendChild(div);
     }
-    container.innerHTML = html;
+}
+
+function handleToggleInterest(e) {
+    var btn = e.target;
+    var intId = btn.getAttribute("data-int-id");
+    var intName = btn.getAttribute("data-int-name");
+    var intReach = parseInt(btn.getAttribute("data-int-reach"));
+    var segId = parseInt(btn.getAttribute("data-seg-id"));
+    toggleInt(intId, intName, intReach, segId);
 }
 
 function isInterestInSegment(intId, segId) {
@@ -135,7 +278,7 @@ function isInterestInSegment(intId, segId) {
 
 function addSegment() {
     segmentId++;
-    var color = COLORS[(segmentId - 1) %% COLORS.length];
+    var color = COLORS[(segmentId - 1) % COLORS.length];
     segments.push({
         id: segmentId,
         name: "Segment " + segmentId,
@@ -201,43 +344,81 @@ function removeInt(intId, segId) {
 
 function renderSegments() {
     var container = document.getElementById("segment-list");
+    container.innerHTML = "";
+    
     if (segments.length === 0) {
         container.innerHTML = "<p class='text-slate-500 text-sm text-center py-4'>Segment ekleyin</p>";
         return;
     }
     
-    var html = "";
     for (var i = 0; i < segments.length; i++) {
         var seg = segments[i];
         var reach = calcSegmentReach(seg.interests);
         var reachText = reach > 0 ? (reach / 1000000).toFixed(2) + "M" : "-";
         
-        html += "<div class='bg-slate-700/30 rounded-lg p-3 mb-2' style='border-left:4px solid " + seg.color + "'>";
-        html += "<div class='flex justify-between items-center mb-2'>";
-        html += "<div class='flex items-center gap-2'>";
-        html += "<div class='w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white' style='background:" + seg.color + "'>" + (i+1) + "</div>";
-        html += "<span class='text-sm font-semibold'>" + seg.name + "</span></div>";
-        html += "<div class='flex items-center gap-2'>";
-        html += "<span class='text-sm font-bold' style='color:" + seg.color + "'>" + reachText + "</span>";
-        html += "<button onclick='removeSegment(" + seg.id + ")' class='text-red-400 text-lg leading-none'>\\u00D7</button>";
-        html += "</div></div>";
+        var div = document.createElement("div");
+        div.className = "bg-slate-700/30 rounded-lg p-3 mb-2";
+        div.style.borderLeft = "4px solid " + seg.color;
         
-        html += "<div class='flex flex-wrap gap-1 min-h-[28px]'>";
+        // Header
+        var header = document.createElement("div");
+        header.className = "flex justify-between items-center mb-2";
+        
+        var leftDiv = document.createElement("div");
+        leftDiv.className = "flex items-center gap-2";
+        leftDiv.innerHTML = "<div class='w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white' style='background:" + seg.color + "'>" + (i+1) + "</div><span class='text-sm font-semibold'>" + seg.name + "</span>";
+        
+        var rightDiv = document.createElement("div");
+        rightDiv.className = "flex items-center gap-2";
+        rightDiv.innerHTML = "<span class='text-sm font-bold' style='color:" + seg.color + "'>" + reachText + "</span>";
+        
+        var delBtn = document.createElement("button");
+        delBtn.className = "text-red-400 text-lg leading-none hover:text-red-300";
+        delBtn.textContent = "\\u00D7";
+        delBtn.setAttribute("data-seg-id", seg.id);
+        delBtn.addEventListener("click", function() {
+            removeSegment(parseInt(this.getAttribute("data-seg-id")));
+        });
+        rightDiv.appendChild(delBtn);
+        
+        header.appendChild(leftDiv);
+        header.appendChild(rightDiv);
+        div.appendChild(header);
+        
+        // Interests
+        var intDiv = document.createElement("div");
+        intDiv.className = "flex flex-wrap gap-1 min-h-[28px]";
+        
         if (seg.interests.length === 0) {
-            html += "<span class='text-slate-500 text-xs'>Kategoriden interest ekleyin</span>";
+            intDiv.innerHTML = "<span class='text-slate-500 text-xs'>Kategoriden interest ekleyin</span>";
         } else {
             for (var j = 0; j < seg.interests.length; j++) {
                 var int = seg.interests[j];
-                html += "<span class='inline-flex items-center gap-1 px-2 py-1 rounded text-xs' ";
-                html += "style='background:" + seg.color + "33; color:" + seg.color + "'>";
-                html += int.name;
-                html += "<button onclick=\"removeInt('" + int.id + "'," + seg.id + ")\" class='ml-1 opacity-70 hover:opacity-100'>\\u00D7</button>";
-                html += "</span>";
+                var span = document.createElement("span");
+                span.className = "inline-flex items-center gap-1 px-2 py-1 rounded text-xs";
+                span.style.background = seg.color + "33";
+                span.style.color = seg.color;
+                
+                var nameSpan = document.createElement("span");
+                nameSpan.textContent = int.name;
+                span.appendChild(nameSpan);
+                
+                var removeBtn = document.createElement("button");
+                removeBtn.className = "ml-1 opacity-70 hover:opacity-100";
+                removeBtn.textContent = "\\u00D7";
+                removeBtn.setAttribute("data-int-id", int.id);
+                removeBtn.setAttribute("data-seg-id", seg.id);
+                removeBtn.addEventListener("click", function() {
+                    removeInt(this.getAttribute("data-int-id"), parseInt(this.getAttribute("data-seg-id")));
+                });
+                span.appendChild(removeBtn);
+                intDiv.appendChild(span);
             }
         }
-        html += "</div></div>";
+        
+        div.appendChild(intDiv);
+        container.appendChild(div);
     }
-    container.innerHTML = html;
 }
 
 function calcSegmentReach(interests) {
@@ -326,7 +507,7 @@ function renderReachList() {
         var s = valid[i];
         var pct = Math.round(s.reach / maxR * 100);
         html += "<div class='relative overflow-hidden rounded mb-1'>";
-        html += "<div class='absolute inset-0 opacity-20' style='background:" + s.color + "; width:" + pct + "%%'></div>";
+        html += "<div class='absolute inset-0 opacity-20' style='background:" + s.color + "; width:" + pct + "%'></div>";
         html += "<div class='relative flex justify-between p-2'>";
         html += "<div class='flex items-center gap-2'><div class='w-3 h-3 rounded-full' style='background:" + s.color + "'></div>";
         html += "<span class='text-sm'>" + s.name + "</span></div>";
@@ -422,106 +603,7 @@ function copyIntersection() {
     navigator.clipboard.writeText(JSON.stringify(spec, null, 2));
     alert("Kesisim kopyalandi!");
 }
-
-// Initialize on DOM ready
-document.addEventListener("DOMContentLoaded", function() {
-    addSegment();
-});
-</script>
-</head>
-<body class="bg-slate-900 text-white min-h-screen p-4">
-<div class="max-w-7xl mx-auto">
-
-<div class="flex items-center gap-4 mb-6">
-    <div class="w-12 h-12 bg-gradient-to-br from-orange-500 to-yellow-500 rounded-xl flex items-center justify-center font-bold text-xl">PO</div>
-    <div>
-        <h1 class="text-xl font-bold text-orange-400">Premium Audience Builder</h1>
-        <p class="text-slate-400 text-sm">Gercek Zamanli Kesisim Analizi</p>
-    </div>
-</div>
-
-<div class="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3 mb-6">
-    <p class="text-sm">Kategoriden interest secin, segment butonlarina tiklayin. Venn ve reach anlik guncellenir.</p>
-</div>
-
-<div class="grid lg:grid-cols-12 gap-4">
-
-<div class="lg:col-span-3 space-y-4">
-    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
-        <h3 class="text-sm text-slate-400 mb-3">KATEGORILER</h3>
-        <div class="grid grid-cols-2 gap-2">
-            <button onclick="loadCategory('coffee')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#9749; Kahve</button>
-            <button onclick="loadCategory('food')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#127869; Yemek</button>
-            <button onclick="loadCategory('travel')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#9992; Seyahat</button>
-            <button onclick="loadCategory('family')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#128106; Aile</button>
-            <button onclick="loadCategory('wellness')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#129495; Saglik</button>
-            <button onclick="loadCategory('tech')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#128241; Teknoloji</button>
-            <button onclick="loadCategory('shopping')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#128722; Alisveris</button>
-            <button onclick="loadCategory('entertainment')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#127916; Eglence</button>
-            <button onclick="loadCategory('auto')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#128663; Otomotiv</button>
-            <button onclick="loadCategory('premium')" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">&#11088; Premium</button>
-        </div>
-    </div>
-    
-    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
-        <h3 class="text-sm text-slate-400 mb-3" id="cat-title">INTERESTS</h3>
-        <div id="interest-list" class="max-h-80 overflow-y-auto">
-            <p class="text-slate-500 text-sm">Kategori secin</p>
-        </div>
-    </div>
-</div>
-
-<div class="lg:col-span-4">
-    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="font-semibold">Segmentler</h3>
-            <button onclick="addSegment()" class="px-3 py-1 bg-green-500/20 text-green-400 rounded text-sm hover:bg-green-500/30">+ Ekle</button>
-        </div>
-        <div id="segment-list"></div>
-    </div>
-</div>
-
-<div class="lg:col-span-5 space-y-4">
-    <div class="grid grid-cols-2 gap-4">
-        <div class="bg-blue-500/20 rounded-xl p-4 border border-blue-500/30">
-            <p class="text-xs text-slate-400">Birlesim (OR)</p>
-            <p class="text-2xl font-bold text-blue-400" id="union-val">0</p>
-        </div>
-        <div class="bg-purple-500/20 rounded-xl p-4 border border-purple-500/30">
-            <p class="text-xs text-slate-400">Kesisim (AND)</p>
-            <p class="text-2xl font-bold text-purple-400" id="inter-val">0</p>
-        </div>
-    </div>
-    
-    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
-        <h3 class="text-sm font-semibold mb-3">Venn Diagram</h3>
-        <svg id="venn" viewBox="0 0 400 250" class="w-full bg-slate-900/50 rounded-lg">
-            <text x="200" y="125" text-anchor="middle" fill="#64748b" font-size="14">Interest ekleyin</text>
-        </svg>
-    </div>
-    
-    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
-        <h3 class="text-sm font-semibold mb-3">Segment Reach</h3>
-        <div id="reach-list">
-            <p class="text-slate-500 text-sm text-center py-2">Interest ekleyin</p>
-        </div>
-    </div>
-    
-    <div class="grid grid-cols-2 gap-2">
-        <button onclick="exportJSON()" class="py-2 bg-green-500/20 text-green-400 rounded text-sm hover:bg-green-500/30">JSON Export</button>
-        <button onclick="copyIntersection()" class="py-2 bg-purple-500/20 text-purple-400 rounded text-sm hover:bg-purple-500/30">Kesisim Kopyala</button>
-    </div>
-</div>
-
-</div>
-</div>
-</body>
-</html>'''
-
-@app.route('/')
-def index():
-    html = HTML % json.dumps(INTERESTS)
-    return html
+'''
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
